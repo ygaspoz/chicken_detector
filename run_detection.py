@@ -1,22 +1,15 @@
 import base64
-import os
 import json
-import requests
 from gradio_client import Client, handle_file
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from dotenv import load_dotenv
 import os
 import requests
 from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
 # ==========================================
 # CONFIGURATION
 # ==========================================
-# 1. Hugging Face Config
-
 load_dotenv()
 
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -27,21 +20,20 @@ ha_url = os.getenv("HA_URL")
 entity_id = os.getenv("HA_CAMERA_ENTITY_ID")
 token = os.getenv("HA_TOKEN")
 IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")
-ALBUM_ID=os.getenv("IMGBB_ALBUM_ID")  # Optional: Imgbb Album ID for organizing uploads
+ALBUM_ID=os.getenv("IMGBB_ALBUM_ID")
 
 # 3. Google Chat Config
-GOOGLE_CHAT_WEBHOOK_URL = os.getenv("GOOGLE_CHAT_WEBHOOK_URL")  # Incoming Webhook URL for Google Chat
+GOOGLE_CHAT_WEBHOOK_URL = os.getenv("GOOGLE_CHAT_WEBHOOK_URL")
 
 print("Fetching camera snapshot...")
 def get_ha_snapshot(ha_url, entity_id, token):
     url = f"{ha_url.rstrip('/')}/api/camera_proxy/{entity_id}"
     headers = {"Authorization": f"Bearer {token}"}
 
-    # Configure retries for SSL/connection drops
     session = requests.Session()
     retries = Retry(
         total=3,
-        backoff_factor=1,  # Waits 1s, 2s, 4s between retries
+        backoff_factor=1,
         status_forcelist=[500, 502, 503, 504],
         raise_on_status=False
     )
@@ -56,6 +48,7 @@ def get_ha_snapshot(ha_url, entity_id, token):
         print("Snapshot saved successfully!")
     else:
         raise RuntimeError(f"Failed to fetch image: {response.status_code} - {response.text}")
+
 # ==========================================
 # 1. HUGGING FACE INFERENCE
 # ==========================================
@@ -69,7 +62,6 @@ def run_hf_inference(image_path: str, categories: str):
     if not os.path.exists(abs_image_path):
         raise FileNotFoundError(f"Source image not found: {abs_image_path}")
 
-    # Call endpoint with parameters matching client.view_api()
     result = client.predict(
         input_type="Image",
         image_file=handle_file(abs_image_path),
@@ -104,13 +96,12 @@ def upload_to_imgbb_album(file_path: str) -> str:
         payload = {
             "key": IMGBB_API_KEY,
             "image": base64.b64encode(file.read()),
-            "album": ALBUM_ID  # <--- Attaches the image directly to your unlisted album
+            "album": ALBUM_ID
         }
         res = requests.post(url, data=payload)
 
     if res.status_code == 200:
         data = res.json()["data"]
-        # Direct image link for Google Chat card rendering
         direct_image_url = data["url"]
         print(f"Uploaded to album: {direct_image_url}")
         return direct_image_url
