@@ -1,0 +1,1 @@
+A simple project that gets the time the sun goes down (and when the chicken should all be inside). It then takes a snapshot from a camera in the coop and sends it to nvidias LocateAnything-3B model. The results are then sent to googlechat
