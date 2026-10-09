@@ -1,4 +1,3 @@
-import base64
 import json
 import os
 import requests
@@ -13,14 +12,17 @@ from urllib3.util.retry import Retry
 load_dotenv()
 
 HF_TOKEN = os.getenv("HF_TOKEN")
-LOCAL_IMAGE_PATH = "snapshot.jpg"
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+LOCAL_IMAGE_PATH = os.path.join(SCRIPT_DIR, "snapshot.jpg")
 TASK_TYPE = "Detection"
 CATEGORIES = "chicken"
 ha_url = os.getenv("HA_URL")
 entity_id = os.getenv("HA_CAMERA_ENTITY_ID")
 token = os.getenv("HA_TOKEN")
-IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")
-ALBUM_ID = os.getenv("IMGBB_ALBUM_ID")
+
+# XBackbone Config
+XBACKBONE_URL = os.getenv("XBACKBONE_URL", "https://pictures.ygaspoz.ch/upload")
+XBACKBONE_TOKEN = os.getenv("XBACKBONE_TOKEN")
 
 # Google Chat Config
 GOOGLE_CHAT_WEBHOOK_URL = os.getenv("GOOGLE_CHAT_WEBHOOK_URL")
@@ -111,41 +113,43 @@ def run_hf_inference(image_path: str, categories: str):
 
 
 # ==========================================
-# 2. Freeimage UPLOAD
+# 2. XBACKBONE UPLOAD
 # ==========================================
-
-def upload_to_freeimage(file_path: str) -> tuple[str, str]:
+def upload_to_xbackbone(file_path: str) -> str:
     if not file_path or not os.path.exists(file_path):
         raise FileNotFoundError(f"File to upload does not exist: {file_path}")
 
-    file_size = os.path.getsize(file_path)
-    print(f"Uploading output image ({file_size} bytes) to FreeImage.host...")
+    if not XBACKBONE_TOKEN:
+        raise ValueError("XBACKBONE_TOKEN is not set in your environment variables.")
 
-    url = "https://freeimage.host/api/1/upload"
+    file_size = os.path.getsize(file_path)
+    print(f"Uploading output image ({file_size} bytes) to XBackbone...")
+
     payload = {
-        "key": "6d207e02198a847aa98d0a2a901485a5",  # Public API key provided by FreeImage
-        "action": "upload",
-        "format": "json"
+        "token": XBACKBONE_TOKEN
     }
 
     with open(file_path, "rb") as f:
-        files = {"source": f}
-        res = requests.post(url, data=payload, files=files, timeout=30)
+        files = {"file": f}
+        res = requests.post(XBACKBONE_URL, data=payload, files=files, timeout=30)
 
-    if res.status_code == 200:
-        data = res.json()["image"]
-        direct_image_url = data["url"]         # Direct raw .jpg/.png for Google Chat
-        viewer_url = data["url_viewer"]        # Web view page for the button
+    # Accept both 200 (OK) and 201 (Created) as successful uploads
+    if res.status_code in [200, 201]:
+        data = res.json()
+
+        # We can use the raw_url to ensure Google Chat embeds the raw image correctly
+        direct_image_url = data.get("raw_url", data.get("url"))
+
         print(f"Uploaded successfully! Direct URL: {direct_image_url}")
-        return direct_image_url, viewer_url
+        return direct_image_url
     else:
-        raise RuntimeError(f"FreeImage upload failed ({res.status_code}): {res.text}")
+        raise RuntimeError(f"XBackbone upload failed ({res.status_code}): {res.text}")
 
 
 # ==========================================
 # 3. GOOGLE CHAT CARD V2 MESSAGE
 # ==========================================
-def send_google_chat_card(webhook_url: str, image_url: str, viewer_link: str, detections: list):
+def send_google_chat_card(webhook_url: str, image_url: str, detections: list):
     print("💬 Posting card message to Google Chat...")
 
     total_count = len(detections)
@@ -180,10 +184,10 @@ def send_google_chat_card(webhook_url: str, image_url: str, viewer_link: str, de
                                     "buttonList": {
                                         "buttons": [
                                             {
-                                                "text": "Open in FreeImage",
+                                                "text": "Open Image",
                                                 "onClick": {
                                                     "openLink": {
-                                                        "url": viewer_link
+                                                        "url": image_url
                                                     }
                                                 },
                                             }
@@ -216,5 +220,5 @@ def send_google_chat_card(webhook_url: str, image_url: str, viewer_link: str, de
 if __name__ == "__main__":
     get_ha_snapshot(ha_url, entity_id, token)
     annotated_path, detections = run_hf_inference(LOCAL_IMAGE_PATH, CATEGORIES)
-    direct_url, viewer_url = upload_to_freeimage(annotated_path)
-    send_google_chat_card(GOOGLE_CHAT_WEBHOOK_URL, direct_url, viewer_url, detections)
+    image_url = upload_to_xbackbone(annotated_path)
+    send_google_chat_card(GOOGLE_CHAT_WEBHOOK_URL, image_url, detections)
